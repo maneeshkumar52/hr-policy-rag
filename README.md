@@ -1,132 +1,125 @@
 # HR Policy RAG
 
-Professional-grade policy retrieval and answer generation system designed for production-style development with clear service boundaries, repeatable setup, and deterministic execution steps.
+![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.111-009688?logo=fastapi&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green)
 
-## 1. Executive Overview
+HR policy RAG assistant for grounded employee policy answers with retrieval auditability, JWT authentication, and HIPAA-style governance controls — powered by Azure OpenAI, Azure AI Search, and Cosmos DB.
 
-This repository provides:
-- A FastAPI service entrypoint for API-first integration
-- Structured modules for orchestration, domain logic, and integrations
-- Test scaffolding for incremental quality assurance
-- Environment-driven configuration for local, staging, and production workflows
+## Architecture
 
-## 2. Architecture
+```
+HR Policy Documents
+        │
+        ▼
+┌──────────────────────────┐
+│  Indexer Pipeline        │
+│  chunker.py → embeddings │──► Azure AI Search (vector index)
+└──────────────────────────┘
 
-### 2.1 Logical Architecture
-
-```txt
-Client / Integrator
-      |
-      v
-FastAPI API Layer (Uvicorn)
-      |
-      +--> Application Layer (routing, orchestration)
-      +--> Domain Layer (business rules)
-      +--> Integration Layer (Azure/OpenAI/search/messaging)
-      +--> Data/State Layer (configured adapters)
+Employee Query
+        │
+        ▼
+┌───────────────────────────────────────┐
+│  FastAPI Service (:8000)              │
+│                                       │
+│  Auth (JWT) ──► validate_user()       │
+│       │                               │
+│  Retriever ──► Azure AI Search        │──► Hybrid vector + keyword search
+│       │                               │
+│  Generator ──► Azure OpenAI (GPT-4o)  │──► Grounded answer with citations
+│       │                               │
+│  AuditLogger ──► Cosmos DB            │──► Full query audit trail
+└───────────────────────────────────────┘
 ```
 
-### 2.2 Runtime Components
-- API Server: FastAPI + Uvicorn
-- Configuration: environment variables and .env file
-- External Integrations: enabled per environment
-- Validation: pytest + e2e demo script
+## Key Features
 
-## 3. Repository Structure
+- **Grounded Policy Answers** — RAG pipeline retrieves relevant policy chunks before generating answers, ensuring responses are backed by actual documents
+- **JWT Authentication** — Token-based auth with role validation for employee access control
+- **Audit Logging** — Every query, retrieved context, and generated answer is logged to Cosmos DB for compliance
+- **Hybrid Search** — Combines vector similarity and keyword matching via Azure AI Search
+- **Policy Chunking** — Smart document chunking with metadata preservation for accurate retrieval
+- **Multi-Tenant Ready** — Cosmos DB partitioning supports multi-organization deployments
 
-```txt
+## Step-by-Step Flow
+
+### Step 1: Policy Ingestion
+Run `indexer/index_documents.py` to chunk HR policy documents from `indexer/documents/` using `chunker.py`, embed them, and index in Azure AI Search.
+
+### Step 2: Employee Authenticates
+Employee sends a JWT token. `auth.py` validates the token and extracts user context (employee_id, role, department).
+
+### Step 3: Query Submission
+Employee submits a policy question via the API.
+
+### Step 4: Retrieval
+`Retriever` performs hybrid search against Azure AI Search, returning the most relevant policy chunks with relevance scores.
+
+### Step 5: Answer Generation
+`Generator` sends the retrieved context + query to GPT-4o with a system prompt that enforces grounded answers with citations.
+
+### Step 6: Audit Trail
+`AuditLogger` writes the full interaction (query, retrieved chunks, generated answer, user context) to Cosmos DB.
+
+## Repository Structure
+
+```
 hr-policy-rag/
-  src/ or orchestrator/
-  tests/
-  infra/
-  requirements.txt
-  demo_e2e.py
+├── src/
+│   ├── api/                     # API route definitions
+│   ├── retriever.py             # Azure AI Search hybrid retrieval
+│   ├── generator.py             # GPT-4o grounded answer generation
+│   ├── auth.py                  # JWT authentication
+│   ├── audit.py                 # Cosmos DB audit logging
+│   ├── models.py                # Pydantic models
+│   └── config.py                # Environment settings
+├── indexer/
+│   ├── index_documents.py       # Document indexing pipeline
+│   ├── chunker.py               # Policy document chunker
+│   └── documents/               # Sample HR policy documents
+├── tests/
+│   ├── test_auth.py
+│   ├── test_retriever.py
+│   └── test_e2e.py
+├── infra/
+│   ├── Dockerfile
+│   └── azure-deploy.sh
+├── demo_e2e.py
+├── requirements.txt
+└── .env.example
 ```
 
-## 4. Prerequisites
-
-- Python 3.10+
-- pip 23+
-- Git
-- Optional cloud credentials for enabled connectors
-
-## 5. Local Setup
-
-1. Clone repository
+## Quick Start
 
 ```bash
 git clone https://github.com/maneeshkumar52/hr-policy-rag.git
 cd hr-policy-rag
-```
-
-2. Create virtual environment
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-3. Install dependencies
-
-```bash
-pip install --upgrade pip
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env   # Configure Azure + JWT credentials
+uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-4. Configure environment
+## Configuration
 
-```bash
-cp .env.example .env 2>/dev/null || true
-```
+| Variable | Description |
+|----------|-------------|
+| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI endpoint |
+| `AZURE_OPENAI_DEPLOYMENT` | Model deployment (gpt-4o) |
+| `AZURE_SEARCH_ENDPOINT` | Azure AI Search endpoint |
+| `AZURE_SEARCH_INDEX_NAME` | Index name (hr-policies) |
+| `COSMOS_ENDPOINT` | Cosmos DB endpoint for audit logs |
+| `COSMOS_DATABASE` | Database name (hr-rag) |
+| `JWT_SECRET` | JWT signing secret |
 
-## 6. Run the Service
-
-```bash
-uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-Service endpoints:
-- API docs: http://127.0.0.1:8000/docs
-- OpenAPI JSON: http://127.0.0.1:8000/openapi.json
-
-## 7. Validation and Test Flow
-
-1. Syntax validation
-
-```bash
-python3 -m compileall -q .
-```
-
-2. Unit/integration tests
+## Testing
 
 ```bash
 pytest -q
-```
-
-3. End-to-end demo
-
-```bash
 python demo_e2e.py
 ```
 
-## 8. Troubleshooting
+## License
 
-- Import or module errors:
-  - Ensure .venv is active
-  - Reinstall dependencies
-- Port already in use:
-  - Change --port value
-- Cloud connector failures:
-  - Validate credentials and service endpoints in .env
-
-## 9. Production Readiness Checklist
-
-- [ ] Environment variables externalized
-- [ ] Secrets not committed
-- [ ] Logging and tracing enabled
-- [ ] Test suite green in CI
-- [ ] Health checks configured in deployment
-
-## 10. License
-
-See LICENSE in this repository.
+MIT
